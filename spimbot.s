@@ -52,12 +52,12 @@ REQUEST_PUZZLE_INT_MASK      = 0x800
 cloud_data:	.space 40
 .align 2
 plant_data:	.space 88
-.align 2
-puzzle_dict: .space 13528
-.align 2
-puzzle_string: .space 129
-.align 2
-solution_data: .space 516
+#.align 2
+#puzzle_dict: .space 13528
+#.align 2
+#puzzle_string: .space 129
+#.align 2
+#solution_data: .space 516
 
 
 .text
@@ -162,6 +162,73 @@ start_puzzle:
 	sw	$t0, 0(t1)
 	jr	$ra
 
+
+
+
+kdata				# interrupt handler data (separated just for readability)
+chunkIH:	.space 8	# space for two registers
+.align 2
+puzzle_dict: .space 13528
+.align 2
+puzzle_string: .space 129
+.align 2
+solution_data: .space 516
+non_intrpt_str:	.asciiz "Non-interrupt exception\n"
+unhandled_str:	.asciiz "Unhandled interrupt type\n"
+
+
+.ktext 0x80000180
+interrupt_handler:
+.set noat
+	move	$k1, $at		# Save $at                               
+.set at
+	la	$k0, chunkIH
+	sw	$a0, 0($k0)		# Get some free registers                  
+	sw	$a1, 4($k0)		# by storing them to a global variable     
+
+	mfc0	$k0, $13		# Get Cause register                       
+	srl	$a0, $k0, 2                
+	and	$a0, $a0, 0xf		# ExcCode field                            
+	bne	$a0, 0, non_intrpt         
+
+interrupt_dispatch:			# Interrupt:
+	li		$t9, 10                             
+	mfc0	$k0, $13		# Get Cause register, again                 
+	beq	$k0, 0, done		# handled all outstanding interrupts     
+
+	and	$a0, $k0, REQ_PUZZLE_MASK    	# is there a request puzzle interrupt?                
+	bne	$a0, 0, req_puzzle_interrupt   
+
+	# add dispatch for other interrupt types here.
+
+	li	$v0, PRINT_STRING	# Unhandled interrupt types
+	la	$a0, unhandled_str
+	syscall 
+	j	done
+
+
+non_intrpt:				# was some non-interrupt
+	li	$v0, PRINT_STRING
+	la	$a0, non_intrpt_str
+	syscall				# print out an error message
+	# fall through to done
+
+done:
+	la	$k0, chunkIH
+	lw	$a0, 0($k0)		# Restore saved registers
+	lw	$a1, 4($k0)
+.set noat
+	move	$at, $k1		# Restore $at
+.set at 
+	eret
+
+
+req_puzzle_interrupt:
+	sw	$a1, REQ_PUZZLE_ACK 	#Acknowledge interrupt
+	j 	solve_puzzle
+
+
+
 solve_puzzle:
 	sub	$sp, $sp, 32				#push stack pointer
 	sw	$ra, 0($sp)
@@ -184,9 +251,10 @@ solve_puzzle:
 	move $a2, $s0
 	move $a1, $s1
 	move $a0, $s2
+
 	jal split_string
 
-	jr $ra
+	j 	interrupt_dispatch				#see if other interrupts are waiting
 
 
 
@@ -420,3 +488,6 @@ ce_done:
 	lw	$s3, 16($sp)		# unsigned remainder
 	add	$sp, $sp, 20
 	jr	$ra
+
+
+
