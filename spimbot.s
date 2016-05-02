@@ -34,7 +34,7 @@ BONK_MASK  = 0x1000
 BONK_ACK   = 0xffff0060
 TIMER_MASK = 0x8000
 TIMER_ACK  = 0xffff006c
-REQ_PUZZLE_MASK = 0X800
+REQ_PUZZLE_MASK = 0x800
 REQ_PUZZLE_ACK = 0xffff00d8
 
 CLOUD_CHANGE_STATUS_ACK      = 0xffff0064
@@ -52,20 +52,89 @@ REQUEST_PUZZLE_INT_MASK      = 0x800
 cloud_data:	.space 40
 .align 2
 plant_data:	.space 88
-#.align 2
-#puzzle_dict: .space 13528
-#.align 2
-#puzzle_string: .space 129
-#.align 2
-#solution_data: .space 516
-
+.align 2
+puzzle_dict: 	.space 13528
+.align 2
+puzzle_string: 	.space 129
+.align 2
+solution_data: 	.space 516
+new_str_address: .word str_memory
+# Don't put anything below this just in case they malloc more than 4096
+str_memory: .space 4096
 
 .text
-water_plant:
-	# go wild
-	# the world is your oyster :)
-	
+.globl main
+main:
 	sub	$sp, $sp, 32
+	sw	$ra, 0($sp)
+	sw	$s0, 4($sp)
+	sw	$s1, 8($sp)
+	sw	$s2, 12($sp)
+	sw	$s3, 16($sp)
+	sw	$s4, 20($sp)
+	sw	$s5, 24($sp)
+	sw	$s6, 28($sp)
+	sw	$s7, 32($sp)
+
+	li	$t0, REQUEST_PUZZLE_INT_MASK		# enable puzzle interrupts
+	or	$t0, $t0, 1				# global interrupt enable
+	mtc0	$t0, $12				# set interrupt mask. what does that mean?
+
+							# still need to load puzzle data
+set_y_position:
+	li	$s0, 230				# store the desired y value
+	lw	$s1, BOT_Y				# get the bot's y location
+	bgt	$s1, $s0, move_up			# move up if the bot is too low
+	blt	$s1, $s0, move_down			# move down if the bot is too high
+	j	destroy_other_spimbots			# otherwise start watering plants
+
+move_up:
+	li	$s2, 270				# prep to face the bot up
+	j	c_movement_io
+
+move_down:
+	li	$s2, 90					# prep to face the bot down
+	j	c_movement_io
+
+c_movement_io:
+	sw	$s2, ANGLE				# set bot angle based on earlier li
+	li	$s2, 1					# use absolute angle
+	sw	$s2, ANGLE_CONTROL
+	li	$s2, 10					# bot velocity = 10
+	sw	$s2, VELOCITY				# bot is now moving towards plant
+
+c_keep_moving:
+	lw	$s1, BOT_Y				# update bot's current Y pos
+	beq	$s0, $s1, destroy_other_spimbots	# stop if we're at the desired Y pos
+	j	c_keep_moving				# otherwise keep moving
+	
+destroy_other_spimbots:
+	#jal	find_nearest_plant			# returns address of nearest plant
+	#move	$a0, $v0				# moves into a0 for next function call
+	jal	water_plant				# waters the plant in a0
+	j	destroy_other_spimbots
+
+c_end:
+	sw	$ra, 0($sp)
+	sw	$s0, 4($sp)
+	sw	$s1, 8($sp)
+	sw	$s2, 12($sp)
+	sw	$s3, 16($sp)
+	sw	$s4, 20($sp)
+	sw	$s5, 24($sp)
+	sw	$s6, 28($sp)
+	sw	$s7, 32($sp)
+	add	$sp, $sp, 32
+	j	$ra
+	
+
+# end of contoller. interrupt handler at the bottom
+
+# this handles watering a plant. 
+# it gets water if needed, and relies on request_water solving a puzzle correctly
+.globl water_plant
+water_plant:
+	sub	$sp, $sp, 28
 	sw	$ra, 0($sp)
 	sw	$s0, 4($sp)
 	sw	$s1, 8($sp)
@@ -74,76 +143,79 @@ water_plant:
 	sw	$s4, 20($sp)
 	#sw	$s5, 24($sp)
 	#sw	$s6, 28($sp)
-	#sw	$s7, 32($sp)
-	li	$t0, CLOUD_CHANGE_STATUS_INT_MASK			
-	or	$t0, $t0, BONK_MASK								# bonk interrupt bit
-	or 	$t0, $t0, REQ_PUZZLE_MASK						# request puzzle interrupt bit
-	or	$t0, $t0, 1										# global interrupt enable
-	mtc0	$t0, $12										# set interrupt mask (Status register)
+	sw	$s7, 24($sp)
 
+	lw	$s0, BOT_X				# s0 contains current bot.x
 
-	lw	$s0, BOT_X				#s0 contains current bot.x
+	la	$s7, plant_data
+	sw	$s7, PLANT_SCAN
 
-	lw	$s1, GET_WATER				#s1 contains how much water we have
+	lw	$s1, GET_WATER				# s1 contains how much water we have
 
-	bne	$s1, $0, water_a_plant			#if we're out of water request some
-	jal	request_water				#eg solve a puzzle
+	bne	$s1, $0, water_a_plant			# if we're out of water request some
+	j	request_water				# eg solve a puzzle
+	lw	$s0, BOT_X				# update bot.x
 
 water_a_plant:
 	la	$s2, plant_data
-	sw	$s2, plant_SCAN
+	sw	$s2, PLANT_SCAN
 
 get_plant_x:
-	move	$s3, $a0				#s3 = plant1.x
-	
+	#move	$s3, $a0				# s3 = nearestPlant.x
+	lw	$s3, 4($s7)	#if FNP isn't working
+
 move_to_plant:
-	bgt	$s0, $s3, move_left			#move left if bot.x > plant.x
-	blt	$s0, $s3, move_right			#move right if bot.x < plant.x
-	j	open_valve				#otherwise we're over the plant already
+	bgt	$s0, $s3, move_left			# move left if bot.x > plant.x
+	blt	$s0, $s3, move_right			# move right if bot.x < plant.x
+	j	open_valve				# otherwise we're over the plant already
 
 move_left:
-	li	$s4, 180				#prep to face bot left
-	j	movement_io
+	li	$s4, 180				# prep to face bot left
+	j	wp_movement_io
 
 move_right:
-	li	$s4, 0					#prep to face bot right
-	j	movement_io
+	li	$s4, 0					# prep to face bot right
+	j	wp_movement_io
 
-movement_io:
-	sw	$s4, ANGLE				#set bot angle based on earlier li
-	li	$s4, 1					#use absolute angle
-	sw	$s4, ANGLE_CONTROL
-	li	$s4, 10					#bot velocity = 10
-	sw	$s4, VELOCITY				#bot is now moving towards plant
+wp_movement_io:
+	sw	$s4, ANGLE				# set bot angle based on earlier li
+	li	$s4, 1					# use absolute angle
+	sw	$s4, ANGLE_CONTROL			# bot is now moving towards plant
+	li	$s4, 10
+	sw	$s4, VELOCITY
 							
-keep_moving:
-	lw	$s4, BOT_X				#update bot's current X pos
-	beq	$s4, $s3, open_valve			#stop if we're above the plant
-	j	keep_moving				#otherwise keep moving
+keep_moving_sideways:
+	lw	$s0, BOT_X				# update bot's current X pos
+	beq	$s0, $s3, open_valve			# stop if we're above the plant
+	j	keep_moving_sideways			# otherwise keep moving
 
 open_valve:
-	li	$s4, 1					#store this to open water valve
-	sw	$s4, WATER_VALVE			#open the water valve
-	j	release_water				#enter plant-watering subloop
+	li	$s4, 0					# stop the bot from moving
+	sw	$s4, VELOCITY
+	li	$s4, 1					# store this to open water valve
+	sw	$s4, WATER_VALVE			# open the water valve
+	j	release_water				# enter plant-watering subloop
 
 release_water:
-	lw	$s1, GET_WATER				#get current water amount
-	bne	$s1, $0, not_out_of_water		#if we're out of water
-	jal	request_water				#request more
+	lw	$s1, GET_WATER				# get current water amount
+	bne	$s1, $0, not_out_of_water		# if we're out of water
+	j	request_water				# request more
 
-not_out_of_water:					#otherwise
-	lw	$s4, 4($s2)				#poll for the first plant's x pos
-	beq	$s0, $s3, release_water			#check that the first plant is still beneath us
-							#if not, we've finished watering the plant
-	j	close_valve				#so close the valve and exit the function
+not_out_of_water:					# otherwise
+	la	$s2, plant_data				# update plant_data
+	sw	$s2, PLANT_SCAN				# with the scanned plant values
+	#move	$s3, $a0				# poll for the "nearest" plant's x pos
+	lw	$s3, 4($s7) 	#if FNP isn't working
+	beq	$s0, $s3, release_water			# check that the "nearest" plant is still beneath us
+							# if not, we've finished watering the plant
+	j	close_valve				# so close the valve and exit the function
 
 close_valve:
-	li	$s4, 0					#store this to close the valve
-	sw	$s4, WATER_VALVE			#close the valve
-	j	end_func				#exit the function
+	li	$s4, 0					# store this to close the valve
+	sw	$s4, WATER_VALVE			# close the valve
+	j	end_func				# exit the function
 
 end_func:
-	add	$sp, $sp, 32
 	lw	$ra, 0($sp)
 	lw	$s0, 4($sp)
 	lw	$s1, 8($sp)
@@ -152,27 +224,184 @@ end_func:
 	lw	$s4, 20($sp)
 	#lw	$s5, 24($sp)
 	#lw	$s6, 28($sp)
-	#lw	$s7, 32($sp)
+	lw	$s7, 24($sp)
+	add	$sp, $sp, 28
+	jr	$ra
+
+request_water:
+	la	$t0, solution_data
+	sw	$t0, REQUEST_PUZZLE
+	j	request_water
+
+wait_for_solved_puzzle:
+	lw	$t0, GET_WATER
+	bgt	$t0, 2, destroy_other_spimbots
+	j 	wait_for_solved_puzzle 
+
+.globl request_water_old
+request_water_old:
+	sub	$sp, $sp, 28
+	sw	$ra, 0($sp)
+	sw	$s0, 4($sp)
+	sw	$s1, 8($sp)
+	sw	$s2, 12($sp)
+	sw	$s3, 16($sp)
+	sw	$s4, 20($sp)
+	#sw	$s5, 24($sp)
+	#sw	$s6, 28($sp)
+	sw	$s7, 24($sp)
+
+	lw	$s0, BOT_X				# s0 contains current bot.x
+
+	lw	$s2, GET_WATER				# get how much water is in the tank
+
+	li	$s4, 0					# store this to close the valve
+	sw	$s4, WATER_VALVE			# close the valve (to be safe)
+
+	la	$s7, cloud_data
+	sw	$s7, CLOUD_SCAN
+
+	lw	$s1, 8($s7) 				# "nearest" cloud xpos	
+	
+move_to_cloud:
+	bgt	$s0, $s1, rw_move_left			# move left if bot.x > cloud.x
+	blt	$s0, $s1, rw_move_right			# move right if bot.x < cloud.x
+	j	wait_for_full_tank			# otherwise we're under the cloud already
+
+rw_move_left:
+	li	$s4, 180				# prep to face bot left
+	j	rw_movement_io
+
+rw_move_right:
+	li	$s4, 0					# prep to face bot right
+	j	rw_movement_io
+
+rw_movement_io:
+	sw	$s4, ANGLE				# set bot angle based on earlier li
+	li	$s4, 1					# use absolute angle
+	sw	$s4, ANGLE_CONTROL			# bot is now moving towards plant
+	li	$s4, 10
+	sw	$s4, VELOCITY
+							
+rw_keep_moving_sideways:
+	lw	$s0, BOT_X				# update bot's current X pos
+	beq	$s0, $s1, wait_for_full_tank		# stop if we're below the cloud
+	j	rw_keep_moving_sideways			# otherwise keep moving
+
+wait_for_full_tank:
+	li	$s4, 0					# stop the bot from moving
+	sw	$s4, VELOCITY
+	lw	$s2, GET_WATER				# update the amount of water in the tank
+	bge	$s2, 40, full_tank			# if the tank is full move along
+	j	wait_for_full_tank			# otherwise wait
+
+full_tank:
+	lw 	$ra, 0($sp)
+	lw 	$s0, 4($sp)
+	lw 	$s1, 8($sp)
+	lw 	$s2, 12($sp)
+	lw 	$s3, 16($sp)
+	lw 	$s4, 20($sp)
+	#lw 	$s5, 24($sp)
+	#lw 	$s6, 28($sp)
+	lw	$s7, 24($sp)
+	add 	$sp, $sp, 28				# destroy stackfame
+
 	jr	$ra
 
 
-start_puzzle:
-	la	$t0, puzzle_dict
-	la	$t1, REQUEST_PUZZLE
-	sw	$t0, 0(t1)
-	jr	$ra
+.globl find_nearest_plant
+find_nearest_plant:
+	sub	$sp, $sp, 32				# creating 8-word stackframe
+	sw 	$ra, 0($sp)				# exit the function
+	sw 	$s0, 4($sp)				# plant_data array address
+	sw 	$s1, 8($sp)				# Bot_X location
+	sw 	$s2, 12($sp)				# current plant x location
+	sw 	$s3, 16($sp)				# closest plant x location
+	sw 	$s4, 20($sp)				# end condition - maximum value of $s0
+	sw 	$s5, 24($sp) 				# temp distance register
+	sw 	$s6, 28($sp) 				# temp distance register
+
+	la 	$s0, plant_data
+	sw 	$s0, PLANT_SCAN				# handled in controller code
+
+	lw 	$s1, 0($s0)				# num_plants
+	mul  	$s4, $s1, 8
+	add 	$s4, $s4, 4 				# maximum value of $s0
+
+	add 	$s0, $s0, 4				# bring s0 to first plant
+
+	li 	$s3, 0x0FFFFFFF				# initialize $s3 to a big value
+
+# loop pseudocode
+# for(plant p : plants) {
+# 	if(abs(bot.x - p.x) < abs(bot.x - minplant.x)) {
+# 		minplant = p;		// store address in $v0
+# 	}
+# }
+
+fnp_loop:
+	bge 	$s0, $s4, fnp_return			# loop end condition
+	lw 	$s1, BOT_X
+	lw 	$s2, 0($s0)				# get current plant x
 
 
+	sub 	$a0, $s1, $s2
+
+	jal 	absolute_val
+	move 	$s5, $v0				# $s5 = abs($s1 - $s2)
 
 
-kdata				# interrupt handler data (separated just for readability)
-chunkIH:	.space 8	# space for two registers
-.align 2
-puzzle_dict: .space 13528
-.align 2
-puzzle_string: .space 129
-.align 2
-solution_data: .space 516
+	sub 	$a0, $s1, $s3
+
+	jal 	absolute_val
+	move 	$s6, $v0				# $s6 = abs($s1 - $s3)
+
+	bge 	$s5, $s6, fnp_loop_skip
+
+	move 	$v0, $s0				# return value = address of current lowest plant
+	move 	$s3, $s2				# nearest plant x = current plant x
+
+fnp_loop_skip:
+	add 	$s0, $s0, 8				# go to next plant
+	j 	fnp_loop
+
+fnp_return:
+	lw 	$ra, 0($sp)
+	lw 	$s0, 4($sp)
+	lw 	$s1, 8($sp)
+	lw 	$s2, 12($sp)
+	lw 	$s3, 16($sp)
+	lw 	$s4, 20($sp)
+	lw 	$s5, 24($sp)
+	lw 	$s6, 28($sp)
+	add 	$sp, $sp, 32				# destroy stackfame
+
+	jr	$ra					# jump to $ra
+
+.globl absolute_val
+absolute_val:
+	sub 	$sp, $sp, 4	
+	sw 	$s0, 0($sp)				# boolean for if $a0 < 0
+
+	slt 	$s0, $a0, $zero      			# is value < 0 ?
+  	beq 	$s0, $zero, abs_return  		# if $a0 is positive, skip next inst
+    	sub 	$v0, $zero, $a0    			# $v0 = 0 - $a0
+
+abs_return:
+	lw 	$s0, 0($sp)
+	add 	$sp, $sp, 4				# destroy stackfame
+	jr	$ra					# jump to $ra
+
+
+.kdata							# interrupt handler data (separated just for readability)
+chunkIH:	.space 8				# space for two registers
+#.align 2
+#puzzle_dict: 	.space 13528
+#.align 2
+#puzzle_string:	.space 129
+#.align 2
+#solution_data: 	.space 516
 non_intrpt_str:	.asciiz "Non-interrupt exception\n"
 unhandled_str:	.asciiz "Unhandled interrupt type\n"
 
@@ -180,57 +409,55 @@ unhandled_str:	.asciiz "Unhandled interrupt type\n"
 .ktext 0x80000180
 interrupt_handler:
 .set noat
-	move	$k1, $at		# Save $at                               
+	move	$k1, $at					# Save $at                               
 .set at
 	la	$k0, chunkIH
-	sw	$a0, 0($k0)		# Get some free registers                  
-	sw	$a1, 4($k0)		# by storing them to a global variable     
+	sw	$a0, 0($k0)					# Get some free registers                  
+	sw	$a1, 4($k0)					# by storing them to a global variable     
 
-	mfc0	$k0, $13		# Get Cause register                       
+	mfc0	$k0, $13					# Get Cause register                       
 	srl	$a0, $k0, 2                
-	and	$a0, $a0, 0xf		# ExcCode field                            
+	and	$a0, $a0, 0xf					# ExcCode field                            
 	bne	$a0, 0, non_intrpt         
 
-interrupt_dispatch:			# Interrupt:
-	li		$t9, 10                             
-	mfc0	$k0, $13		# Get Cause register, again                 
-	beq	$k0, 0, done		# handled all outstanding interrupts     
+interrupt_dispatch:						# Interrupt:
+	li	$t9, 10                             
+	mfc0	$k0, $13					# Get Cause register, again                 
+	beq	$k0, 0, done					# handled all outstanding interrupts     
 
-	and	$a0, $k0, REQ_PUZZLE_MASK    	# is there a request puzzle interrupt?                
+	and	$a0, $k0, REQ_PUZZLE_MASK    			# is there a request puzzle interrupt?                
 	bne	$a0, 0, req_puzzle_interrupt   
 
 	# add dispatch for other interrupt types here.
 
-	li	$v0, PRINT_STRING	# Unhandled interrupt types
-	la	$a0, unhandled_str
-	syscall 
+	li	$v0, PRINT_STRING				# Unhandled interrupt types
+	la	$a0, unhandled_str 
 	j	done
 
 
-non_intrpt:				# was some non-interrupt
+non_intrpt:							# was some non-interrupt
 	li	$v0, PRINT_STRING
-	la	$a0, non_intrpt_str
-	syscall				# print out an error message
+	la	$a0, non_intrpt_str				# print out an error message
 	# fall through to done
 
 done:
 	la	$k0, chunkIH
-	lw	$a0, 0($k0)		# Restore saved registers
+	lw	$a0, 0($k0)					# Restore saved registers
 	lw	$a1, 4($k0)
 .set noat
-	move	$at, $k1		# Restore $at
+	move	$at, $k1					# Restore $at
 .set at 
 	eret
 
 
 req_puzzle_interrupt:
-	sw	$a1, REQ_PUZZLE_ACK 	#Acknowledge interrupt
+	sw	$a1, REQ_PUZZLE_ACK 				#Acknowledge interrupt
 	j 	solve_puzzle
 
 
 
 solve_puzzle:
-	sub	$sp, $sp, 32				#push stack pointer
+	sub	$sp, $sp, 32					#push stack pointer
 	sw	$ra, 0($sp)
 	sw	$s0, 4($sp)
 	sw	$s1, 8($sp)
@@ -240,19 +467,19 @@ solve_puzzle:
 	sw	$s5, 24($sp)
 	sw	$s6, 28($sp)
 	# Get puzzle
-	la  $s0, puzzle_dict			#get the puzzle 
+	la  	$s0, puzzle_dict			#get the puzzle 
 	# Get word to search for
-	la  $s1, puzzle_string 			#get the word we intend to search for
+	la  	$s1, puzzle_string 			#get the word we intend to search for
 
 	sw 	$s1, REQUEST_PUZZLE_STRING
 
 	la 	$s2, solution_data
 
-	move $a2, $s0
-	move $a1, $s1
-	move $a0, $s2
+	move 	$a2, $s0
+	move 	$a1, $s1
+	move 	$a0, $s2
 
-	jal split_string
+	jal 	split_string
 
 	j 	interrupt_dispatch				#see if other interrupts are waiting
 
@@ -324,9 +551,6 @@ ss_return:
 	lw	$s4, 20($sp)
 	add	$sp, $sp, 24
 	jr	$ra
-
-
-
 
 
 .globl sub_str
@@ -489,5 +713,9 @@ ce_done:
 	add	$sp, $sp, 20
 	jr	$ra
 
-
-
+.globl malloc
+malloc:
+	lw	$v0, new_str_address
+	add	$t0, $v0, $a0
+	sw	$t0, new_str_address
+	jr	$ra
