@@ -115,7 +115,7 @@ main:
 
 							# still need to load puzzle data
 set_y_position:
-	li	$s0, 75				# store the desired y value
+	li	$s0, 25					# store the desired y value
 	lw	$s1, BOT_Y				# get the bot's y location
 	bgt	$s1, $s0, move_up			# move up if the bot is too low
 	blt	$s1, $s0, move_down			# move down if the bot is too high
@@ -151,6 +151,9 @@ destroy_other_spimbots:
 	jal	water_plant				# waters the plant in a0
 	add	$s3, $s3, 1
 	bgt	$s3, $s6, set_s3_0			# if we're at an out-of-index plant, reset to 0
+	lw	$s4, GET_WATER
+	bne	$s4, $0, destroy_other_spimbots
+	jal	request_water
 	j	destroy_other_spimbots
 
 set_s3_0:
@@ -282,11 +285,11 @@ release_water_improved:
 drop_4_drops:
 	lw	$s1, GET_WATER
 	ble	$s1, $s5, close_valve			# if the plant is watered we're done
-	bne	$s1, $0, dont_req_water
-	jal	request_water
+	beq	$s1, $0, close_valve
+	#jal	request_water
 
-dont_req_water:						# if we're out of water get more
-	j	drop_4_drops
+#dont_req_water:						# if we're out of water get more
+#	j	drop_4_drops
 
 #release_water:
 #	lw	$s1, GET_WATER				# get current water amount
