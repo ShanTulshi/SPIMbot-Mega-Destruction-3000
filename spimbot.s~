@@ -114,7 +114,7 @@ main:
 
 							# still need to load puzzle data
 set_y_position:
-	li	$s0, 25					# store the desired y value
+	li	$s0, 75					# store the desired y value
 	lw	$s1, BOT_Y				# get the bot's y location
 	bgt	$s1, $s0, move_up			# move up if the bot is too low
 	blt	$s1, $s0, move_down			# move down if the bot is too high
@@ -139,19 +139,14 @@ c_keep_moving:
 	lw	$s1, BOT_Y				# update bot's current Y pos
 	beq	$s0, $s1, destroy_other_spimbots	# stop if we're at the desired Y pos
 	j	c_keep_moving				# otherwise keep moving
-	
+
+########## MAIN FUNCTION CONTROL LOOPS HERE
 destroy_other_spimbots:
-	#comment the first two insts out if FNP isn't working
-	#jal	find_nearest_plant			# returns address of nearest plant
-	#move	$a0, $v0				# moves into a0 for next function call
 	lw	$s5, 0($s7)				# num plants
 	blt	$s3, $s5, dont_reset_counter
 	li	$s3, 0
 
 dont_reset_counter:
-	#move	$a0, $s3				# load current plant index into a0
-	#jal	find_plant
-	#move	$a0, $v0
 	mul	$s5, $s3, 8				# offset
 	add	$a0, $s5, $s6				# addr of plant to water
 	jal	water_plant				# waters the plant in a0
@@ -164,9 +159,16 @@ water_loop:
 	la	$t0, puzzle_dict
 	sw	$t0, REQUEST_PUZZLE
 
+move_under_cloud:
+	la	$t7, cloud_data
+	sw	$t7, CLOUD_SCAN
+	lw	$t1, 8($t7)
+	# move plant down beneath cloud y (by like 30)
+	# move plant horizontally to cloud
+	
 wait_for_solved_puzzle:
 	lw	$t0, GET_WATER
-	bgt	$t0, 2, destroy_other_spimbots
+	bgt	$t0, 39, destroy_other_spimbots
 	j	wait_for_solved_puzzle
 
 c_end:
@@ -332,23 +334,6 @@ end_func:
 	add	$sp, $sp, 28
 	jr	$ra
 
-.globl request_water
-request_water:
-	la	$t0, puzzle_dict
-	sw	$t0, REQUEST_PUZZLE
-
-wait_for_solved_puzzle:
-	lw	$t0, GET_WATER
-	bgt	$t0, 2, return
-	j	wait_for_solved_puzzle
-
-return:
-	jr	$ra
-
-
-
-
-
 .globl find_nearest_plant
 find_nearest_plant:
 	sub	$sp, $sp, 32				# creating 8-word stackframe
@@ -493,10 +478,14 @@ done:
 .set at 
 	eret
 
-
 bonk_interrupt:
 	sw	$a1, BONK_ACK					# acknowledge interrupt
-	sw	$zero, VELOCITY					# make velocity zero
+	li	$t0, 180		
+	sw	$t0, ANGLE					# turn the bot around
+	li	$t0, 0
+	sw	$t0, ANGLE_CONTROL
+	li	$t0, 10
+	sw	$t0, VELOCITY
 
 	j	interrupt_dispatch				# see if other interrupts are waiting
 
@@ -574,10 +563,14 @@ solve_puzzle:
 
 	la 	$a0, solution_data
 
+	la	$s0, str_memory
+
 	jal 	split_string
 	
 	la	$a0, solution_data
 	sw	$a0, SUBMIT_SOLUTION	
+
+	sw	$s0, str_memory
 
 	j 	interrupt_dispatch				#see if other interrupts are waiting
 
