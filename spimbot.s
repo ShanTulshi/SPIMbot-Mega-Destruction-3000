@@ -142,6 +142,11 @@ c_keep_moving:
 
 ########## MAIN FUNCTION CONTROL LOOPS HERE
 destroy_other_spimbots:
+	li	$t8, 10
+	sw	$t8, VELOCITY
+	lw	$t8, BOT_Y
+	li	$t9, 75
+	bne	$t8, $t9, set_y_position
 	lw	$s5, 0($s7)				# num plants
 	blt	$s3, $s5, dont_reset_counter
 	li	$s3, 0
@@ -158,14 +163,53 @@ dont_reset_counter:
 water_loop:
 	la	$t0, puzzle_dict
 	sw	$t0, REQUEST_PUZZLE
+	j	wait_for_solved_puzzle
 
-#move_under_cloud:
-#	la	$t7, cloud_data
-#	sw	$t7, CLOUD_SCAN
-#	lw	$t1, 8($t7)
-#	li	$
-	# move plant down beneath cloud y (by like 30)
-	# move plant horizontally to cloud
+move_under_cloud:
+	li	$t7, 1					# absolute angle
+	sw	$t7, ANGLE_CONTROL
+	li	$t7, 90
+	sw	$t7, ANGLE				# turn bot down
+	la	$t7, cloud_data
+	sw	$t7, CLOUD_SCAN
+	lw	$t1, 8($t7)
+	lw	$t2, 12($t7)
+	add	$t2, $t2, 30				# give a buffer to cloud's y loc
+
+move_vertically_down:
+	lw	$t3, BOT_Y				# bot's y loc
+	bge	$t3, $t2, stop_moving_vertically	# if bot reaches destination height stop
+	j	move_vertically_down
+
+stop_moving_vertically:
+	lw	$t4, 8($t7)				# cloud's x loc
+	li	$t5, BOT_X				# bot's x
+	bgt	$t5, $t4, face_bot_left
+	blt	$t5, $t4, face_bot_right
+	j	under_cloud
+
+face_bot_left:
+	li	$t6, 1
+	sw	$t6, ANGLE_CONTROL
+	li	$t6, 180
+	sw	$t6, ANGLE
+	j	move_bot_to_cloud
+
+face_bot_right:
+	li	$t6, 1
+	sw	$t6, ANGLE_CONTROL
+	li	$t6, 0
+	sw	$t6, ANGLE
+	j	move_bot_to_cloud
+
+move_bot_to_cloud:
+	lw	$t5, BOT_X
+	beq	$t5, $t4, under_cloud
+	j	move_bot_to_cloud
+
+under_cloud:
+	li	$t6, 0
+	sw	$t6, VELOCITY
 	
 wait_for_solved_puzzle:
 	lw	$t0, GET_WATER
