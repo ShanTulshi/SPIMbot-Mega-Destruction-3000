@@ -77,6 +77,8 @@ main:
 	sw	$s7, 32($sp)
 
 	li	$t0, REQUEST_PUZZLE_INT_MASK		# enable puzzle interrupts
+	or 	$t0, $t0, BONK_MASK
+	or	$t0, $t0, CLOUD_CHANGE_STATUS_INT_MASK
 	or	$t0, $t0, 1				# global interrupt enable
 	mtc0	$t0, $12				# set interrupt mask. what does that mean?
 
@@ -190,11 +192,25 @@ keep_moving_sideways:
 	j	keep_moving_sideways			# otherwise keep moving
 
 open_valve:
+	lw	$s1, BOT_Y
+	bge	$s1, 75, move_up_to_water
 	li	$s4, 0					# stop the bot from moving
 	sw	$s4, VELOCITY
 	li	$s4, 1					# store this to open water valve
 	sw	$s4, WATER_VALVE			# open the water valve
 	j	release_water				# enter plant-watering subloop
+
+move_up_to_water:
+	li	$s1, 1
+	sw	$s1, ANGLE_CONTROL				#make sure angle is absolute rather than relative	
+	li	$s1, 270			
+	sw	$s1, ANGLE 					#set angle to 270
+	li	$s1, 10
+	sw	$s1, VELOCITY 					#make velocity 1
+	lw	$s1, BOT_Y
+	bge	$s1, 75, move_up_to_water
+	j	open_valve
+
 
 release_water:
 	lw	$s1, GET_WATER				# get current water amount
@@ -237,76 +253,8 @@ wait_for_solved_puzzle:
 	bgt	$t0, 2, destroy_other_spimbots
 	j 	wait_for_solved_puzzle 
 
-.globl request_water_old
-request_water_old:
-	sub	$sp, $sp, 28
-	sw	$ra, 0($sp)
-	sw	$s0, 4($sp)
-	sw	$s1, 8($sp)
-	sw	$s2, 12($sp)
-	sw	$s3, 16($sp)
-	sw	$s4, 20($sp)
-	#sw	$s5, 24($sp)
-	#sw	$s6, 28($sp)
-	sw	$s7, 24($sp)
 
-	lw	$s0, BOT_X				# s0 contains current bot.x
 
-	lw	$s2, GET_WATER				# get how much water is in the tank
-
-	li	$s4, 0					# store this to close the valve
-	sw	$s4, WATER_VALVE			# close the valve (to be safe)
-
-	la	$s7, cloud_data
-	sw	$s7, CLOUD_SCAN
-
-	lw	$s1, 8($s7) 				# "nearest" cloud xpos	
-	
-move_to_cloud:
-	bgt	$s0, $s1, rw_move_left			# move left if bot.x > cloud.x
-	blt	$s0, $s1, rw_move_right			# move right if bot.x < cloud.x
-	j	wait_for_full_tank			# otherwise we're under the cloud already
-
-rw_move_left:
-	li	$s4, 180				# prep to face bot left
-	j	rw_movement_io
-
-rw_move_right:
-	li	$s4, 0					# prep to face bot right
-	j	rw_movement_io
-
-rw_movement_io:
-	sw	$s4, ANGLE				# set bot angle based on earlier li
-	li	$s4, 1					# use absolute angle
-	sw	$s4, ANGLE_CONTROL			# bot is now moving towards plant
-	li	$s4, 10
-	sw	$s4, VELOCITY
-							
-rw_keep_moving_sideways:
-	lw	$s0, BOT_X				# update bot's current X pos
-	beq	$s0, $s1, wait_for_full_tank		# stop if we're below the cloud
-	j	rw_keep_moving_sideways			# otherwise keep moving
-
-wait_for_full_tank:
-	li	$s4, 0					# stop the bot from moving
-	sw	$s4, VELOCITY
-	lw	$s2, GET_WATER				# update the amount of water in the tank
-	bge	$s2, 40, full_tank			# if the tank is full move along
-	j	wait_for_full_tank			# otherwise wait
-
-full_tank:
-	lw 	$ra, 0($sp)
-	lw 	$s0, 4($sp)
-	lw 	$s1, 8($sp)
-	lw 	$s2, 12($sp)
-	lw 	$s3, 16($sp)
-	lw 	$s4, 20($sp)
-	#lw 	$s5, 24($sp)
-	#lw 	$s6, 28($sp)
-	lw	$s7, 24($sp)
-	add 	$sp, $sp, 28				# destroy stackfame
-
-	jr	$ra
 
 
 .globl find_nearest_plant
@@ -427,7 +375,12 @@ interrupt_dispatch:						# Interrupt:
 	and	$a0, $k0, REQ_PUZZLE_MASK    			# is there a request puzzle interrupt?                
 	bne	$a0, 0, req_puzzle_interrupt   
 
-	# add dispatch for other interrupt types here.
+
+	and	$a0, $k0, BONK_MASK				# is there a bonk interrupt?                
+	bne	$a0, 0, bonk_interrupt   
+
+	and $a0, $k0, CLOUD_CHANGE_STATUS_INT_MASK		#is there a cloud change status interrupt
+	bne $a0, 0, cloud_interrupt
 
 	li	$v0, PRINT_STRING				# Unhandled interrupt types
 	la	$a0, unhandled_str 
@@ -449,9 +402,70 @@ done:
 	eret
 
 
+bonk_interrupt:
+	sw	$a1, BONK_ACK		# acknowledge interrupt
+	sw	$zero, VELOCITY		# make velocity zero
+
+	j	interrupt_dispatch	# see if other interrupts are waiting
+
+
+cloud_interrupt:
+	sw	$a1, CLOUD_CHANGE_STATUS_ACK			#acknowledge interrupt
+	la	$t0, CLOUD_STATUS_INFO				#Get cloud status info to figure out the reason behind interrupt
+	lb	$t1, 0($t0)					#get char action
+	beq	$t1, $zero, interrupt_dispatch			#if our action dictactes is to do nothing, just jump to interrupt_dispatch 
+	beq	$t1, 1, enter_cloud				#we are entering a cloud
+	beq	$t1, 2, exit_cloud				#we are exiting the cloud
+
+	j 	interrupt_dispatch				#see if other interrupts are waiting
+
+enter_cloud:
+	la	$t1, plant_data
+	sw	$t1, PLANT_SCAN					#plant_data has now been populated with the array of plant information
+	lw	$t2, 4($t1)					#get the plant's x_coordinate
+	lw	$t3, BOT_X					#get the bot's x_coordinate
+	j	exit_cloud					#leave the cloud instead of doing anything with it for now
+	j 	comparison
+
+exit_cloud:
+	li	$t3, 1
+	sw	$t3, ANGLE_CONTROL				#make sure angle is absolute rather than relative	
+	li	$t3, 270			
+	sw	$t3, ANGLE 					#set angle to 270
+	li	$t3, 10
+	sw	$t3, VELOCITY 					#make velocity 1
+	lw	$t3, BOT_Y
+	bge	$t3, 75, exit_cloud
+	j 	interrupt_dispatch
+
+comparison:
+	lw	$t3, BOT_X					#get the bot's x_coordinate
+	bgt	$t2, $t3, plant_ahead 				#if the plant's x_coordinate is ahead of the bots x_coordinate, jump to plant_ahead
+	blt $t2, $t3, plant_behind			#if the plant's x_coordinate is behind the bots x_coordinate, jump to plant_behind
+	beq	$t2, $t3, interrupt_dispatch		
+
+plant_ahead:
+	li	$t4, 1
+	sw	$t4, ANGLE_CONTROL				#make sure angle is absolute rather than relative	
+	sw	$zero, ANGLE 					#set angle to zero										
+	sw	$t9, VELOCITY           		#set velocity to 1
+	j 	comparison						#go to comparison
+
+plant_behind:
+	li	$t4, 1
+	li	$t6, 180
+	sw	$t4, ANGLE_CONTROL				#make sure angle is absolute rather than relative				
+	sw	$t6, ANGLE 						#set angle to 180
+	sw	$t9, VELOCITY  					#set velocity to 1
+	j 	comparison						#go to comparison
+
+
+
+
 req_puzzle_interrupt:
 	sw	$a1, REQ_PUZZLE_ACK 				#Acknowledge interrupt
 	j 	solve_puzzle
+
 
 
 
@@ -480,6 +494,7 @@ solve_puzzle:
 	sw	$a0, SUBMIT_SOLUTION	
 
 	j 	interrupt_dispatch				#see if other interrupts are waiting
+
 
 
 
@@ -528,7 +543,6 @@ ss_for:
 	beq	$v0, $0, ss_continue
 
 	sw	$s4, 0($s0)		# *solution = prefix
-	sw	$s0, 0($t0)  	#store solution into SUBMIT_SOLUTION
 	li	$v0, 1			# return 1
 	j	ss_return
 
