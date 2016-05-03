@@ -483,7 +483,6 @@ solve_puzzle:
 
 
 
-
 .globl split_string
 split_string:
 	sw	$0, 0($a0)
@@ -529,6 +528,7 @@ ss_for:
 	beq	$v0, $0, ss_continue
 
 	sw	$s4, 0($s0)		# *solution = prefix
+	sw	$s0, 0($t0)  	#store solution into SUBMIT_SOLUTION
 	li	$v0, 1			# return 1
 	j	ss_return
 
