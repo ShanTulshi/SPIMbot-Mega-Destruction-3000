@@ -276,7 +276,7 @@ open_valve:
 
 release_water_improved:
 	lw	$s1, GET_WATER				# get current water amount
-	sub 	$s5, $s1, 4				# s5 = 4 drops less than we have
+	sub 	$s5, $s1, 3				# s5 = 4 drops less than we have
 	j	drop_4_drops
 
 drop_4_drops:
