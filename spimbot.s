@@ -102,10 +102,9 @@ main:
 
 	la	$s7, plant_data
 	sw	$s7, PLANT_SCAN
-	
-	lw	$s6, 0($s7)				# s6 = numplants
 
 	li	$s3, 0					# counter for which plant we're on
+	add	$s6, $s7, 4				# addr of first plant
 
 	li	$t0, REQUEST_PUZZLE_INT_MASK		# enable puzzle interrupts
 	or 	$t0, $t0, BONK_MASK
@@ -145,20 +144,30 @@ destroy_other_spimbots:
 	#comment the first two insts out if FNP isn't working
 	#jal	find_nearest_plant			# returns address of nearest plant
 	#move	$a0, $v0				# moves into a0 for next function call
-	move	$a0, $s3				# load current plant index into a0
-	jal	find_plant
-	move	$a0, $v0
+	lw	$s5, 0($s7)				# num plants
+	blt	$s3, $s5, dont_reset_counter
+	li	$s3, 0
+
+dont_reset_counter:
+	#move	$a0, $s3				# load current plant index into a0
+	#jal	find_plant
+	#move	$a0, $v0
+	mul	$s5, $s3, 8				# offset
+	add	$a0, $s5, $s6				# addr of plant to water
 	jal	water_plant				# waters the plant in a0
 	add	$s3, $s3, 1
-	bgt	$s3, $s6, set_s3_0			# if we're at an out-of-index plant, reset to 0
 	lw	$s4, GET_WATER
-	bne	$s4, $0, destroy_other_spimbots
-	jal	request_water
-	j	destroy_other_spimbots
+	bgt	$s4, $0, destroy_other_spimbots
+	j	water_loop
 
-set_s3_0:
-	li	$s3, 0					# plant index is 0 again
-	j	destroy_other_spimbots
+water_loop:
+	la	$t0, puzzle_dict
+	sw	$t0, REQUEST_PUZZLE
+
+wait_for_solved_puzzle:
+	lw	$t0, GET_WATER
+	bgt	$t0, 2, destroy_other_spimbots
+	j	wait_for_solved_puzzle
 
 c_end:
 	sw	$ra, 0($sp)
@@ -233,9 +242,9 @@ water_plant:
 
 	lw	$s1, GET_WATER				# s1 contains how much water we have
 
-	bne	$s1, $0, water_a_plant			# if we're out of water request some
-	j	request_water				# eg solve a puzzle
-	lw	$s0, BOT_X				# update bot.x
+	#bne	$s1, $0, water_a_plant			# if we're out of water request some
+	#j	request_water				# eg solve a puzzle
+	#lw	$s0, BOT_X				# update bot.x
 
 water_a_plant:
 	la	$s2, plant_data
@@ -286,7 +295,7 @@ drop_4_drops:
 	lw	$s1, GET_WATER
 	ble	$s1, $s5, close_valve			# if the plant is watered we're done
 	beq	$s1, $0, close_valve
-	#jal	request_water
+	j	drop_4_drops
 
 #dont_req_water:						# if we're out of water get more
 #	j	drop_4_drops
@@ -322,23 +331,6 @@ end_func:
 	lw	$s7, 24($sp)
 	add	$sp, $sp, 28
 	jr	$ra
-
-.globl request_water
-request_water:
-	la	$t0, puzzle_dict
-	sw	$t0, REQUEST_PUZZLE
-
-wait_for_solved_puzzle:
-	lw	$t0, GET_WATER
-	bgt	$t0, 2, return
-	j	wait_for_solved_puzzle
-
-return:
-	jr	$ra
-
-
-
-
 
 .globl find_nearest_plant
 find_nearest_plant:
