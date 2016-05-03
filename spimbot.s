@@ -1,3 +1,26 @@
+# current progress and possible solutions:
+# we can water plants pretty well if we have sufficient water. 
+# a working nearestPlant method would be great
+# when we run out of water we suck
+# it looks like our puzzle solver isn't returning the right thing 
+# (or isn't returning to the right address or something)
+# you can put a breakpoint at the acknowledge line of the 
+# interrupt handler to step through the logic of the puzzle
+# solving process.
+
+# if all else fails, we can try to get this method working
+# which should get 10 plants watered no problem
+# enter the cloud from the bottom and move it to the first plant
+# while this is happening you fill up your water tank
+# if your tank is full, go water plants until it's empty. then
+# go move clouds again until the tank is full.
+# hopefully we can use zohair's code to ensure that 
+# we can get into a cloud from any position to pass the test
+# cases for 10 clouds.
+# this method isn't great against other bots but it can get
+# us 60%
+
+
 # syscall constants
 PRINT_STRING = 4
 PRINT_CHAR   = 11
@@ -231,7 +254,6 @@ end_func:
 request_water:
 	la	$t0, solution_data
 	sw	$t0, REQUEST_PUZZLE
-	j	request_water
 
 wait_for_solved_puzzle:
 	lw	$t0, GET_WATER
@@ -454,8 +476,6 @@ req_puzzle_interrupt:
 	sw	$a1, REQ_PUZZLE_ACK 				#Acknowledge interrupt
 	j 	solve_puzzle
 
-
-
 solve_puzzle:
 	sub	$sp, $sp, 32					#push stack pointer
 	sw	$ra, 0($sp)
@@ -541,6 +561,8 @@ ss_continue:
 
 ss_done:
 	li	$v0, 0			# return 0
+	#do we need to load the address of solution anywhere?
+	#store that in $v1 or something?
 
 ss_return:
 	lw	$ra, 0($sp)
